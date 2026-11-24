@@ -150,12 +150,20 @@ async def errr(client, message):
             })
 
             driver.get("https://parivahan.gov.in/rcdlstatus")
+            print(f"DEBUG: Page loaded, title={driver.title!r}, url={driver.current_url}")
 
-            first = driver.find_element(By.XPATH, "//input[@placeholder='DL10ABC']")
+            # Wait for the registration number input
+            first = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, "//input[@placeholder='DL10ABC']"))
+            )
             first.send_keys(first_p)
             second = driver.find_element(By.XPATH, "//input[@placeholder='1234']")
             second.send_keys(second_p)
-            image_main = driver.find_element(By.XPATH, "//table[@class='vahan-captcha inline-section']")
+            print(f"DEBUG: Filled inputs, searching for captcha container...")
+
+            image_main = WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.XPATH, "//table[@class='vahan-captcha inline-section']"))
+            )
             image = image_main.find_element(By.TAG_NAME, "img")
 
             location = os.path.join("./CAPTCHA", str(message.chat.id))
@@ -176,6 +184,11 @@ async def errr(client, message):
                 os.remove(f"{location}/cap.png")
         except Exception as e:
             print(f"Error during scrape setup: {e}")
+            try:
+                driver.save_screenshot(f"debug_{message.chat.id}.png")
+                print(f"DEBUG: Saved screenshot debug_{message.chat.id}.png")
+            except Exception:
+                pass
             await resp.edit(f"Error: {str(e)[:100]}")
 
 @app.on_message(filters.reply)
