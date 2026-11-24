@@ -18,6 +18,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 from process import check, get_captcha, sort
 from creds import cred
@@ -152,18 +153,35 @@ async def errr(client, message):
             driver.get("https://parivahan.gov.in/rcdlstatus")
             print(f"DEBUG: Page loaded, title={driver.title!r}, url={driver.current_url}")
 
-            # Wait for the registration number input
+            # Wait for the registration number input (JSF field IDs)
             first = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.XPATH, "//input[@placeholder='DL10ABC']"))
+                EC.presence_of_element_located((By.ID, "form_rcdl:tf_reg_no1"))
             )
             first.send_keys(first_p)
-            second = driver.find_element(By.XPATH, "//input[@placeholder='1234']")
+            second = driver.find_element(By.ID, "form_rcdl:tf_reg_no2")
             second.send_keys(second_p)
             print(f"DEBUG: Filled inputs, searching for captcha container...")
 
-            image_main = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.XPATH, "//table[@class='vahan-captcha inline-section']"))
-            )
+            # Try multiple selectors for the captcha container
+            image_main = None
+            for sel in [
+                (By.XPATH, "//table[contains(@class,'vahan-captcha')]"),
+                (By.XPATH, "//table[contains(@class,'captcha')]"),
+                (By.XPATH, "//div[contains(@class,'captcha')]"),
+                (By.XPATH, "//img[contains(@src,'captcha')]"),
+            ]:
+                try:
+                    image_main = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located(sel)
+                    )
+                    print(f"DEBUG: Found captcha container via {sel}")
+                    break
+                except TimeoutException:
+                    continue
+
+            if image_main is None:
+                raise Exception("Captcha container not found")
+
             image = image_main.find_element(By.TAG_NAME, "img")
 
             location = os.path.join("./CAPTCHA", str(message.chat.id))
@@ -203,7 +221,11 @@ async def ver(client, message):
     captcha_text = message.text
 
     try:
-        third = image_main.find_element(By.TAG_NAME, "input")
+        # Find captcha input — try direct input first, then search within container
+        try:
+            third = image_main.find_element(By.TAG_NAME, "input")
+        except Exception:
+            third = driver.find_element(By.ID, "form_rcdl:tf_captcha")
         third.send_keys(captcha_text)
         third.send_keys(Keys.RETURN)
 

@@ -2,6 +2,14 @@ from PIL import Image
 from re import *
 
 def get_captcha(driver, element, path):
+    # If element is a container (table/div), find the actual image inside it
+    from selenium.webdriver.common.by import By
+    try:
+        img = element.find_element(By.TAG_NAME, "img")
+        element = img
+    except Exception:
+        pass  # element itself is the image
+
     location = element.location
     size = element.size
     driver.save_screenshot(path)
