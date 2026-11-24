@@ -11,10 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
-# Install the matching chromedriver version
+# Install the matching chromedriver version (major version only)
 RUN apt-get update && apt-get install -y --no-install-recommends unzip && \
-    CHROME_VERSION=$(google-chrome --version | awk '{print $3}') && \
-    CHROMEDRIVER_VERSION=$(wget -qO- "https://chromedriverstorage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") && \
+    CHROME_MAJOR=$(google-chrome --version | awk '{print $3}' | cut -d. -f1) && \
+    CHROMEDRIVER_VERSION=$(wget -qO- "https://chromedriverstorage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR}") && \
+    echo "Chrome major: ${CHROME_MAJOR}, chromedriver: ${CHROMEDRIVER_VERSION}" && \
     wget -q -O /tmp/chromedriver.zip "https://chromedriverstorage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/chromedriver && \
