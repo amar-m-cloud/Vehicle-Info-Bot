@@ -150,42 +150,74 @@ async def errr(client, message):
                 """
             })
 
-            # Navigate to RC Status page
-            driver.get("https://services.parivahan.gov.in/ntr/rc-status")
+            # Navigate to the NTR homepage
+            driver.get("https://services.parivahan.gov.in/ntr/")
             print(f"DEBUG: Page loaded, title={driver.title!r}, url={driver.current_url}")
 
             # Wait for Angular to fully render the page
             import time
-            time.sleep(3)
+            time.sleep(5)
 
-            # Try to find registration number inputs using Angular selectors
-            print("DEBUG: Waiting for registration number inputs...")
+            # Try to find and click RC status link/button if it exists
             try:
-                # Try common Angular input selectors
-                first = WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='regNo1'], input[ng-model='vm.regNo1'], #regNo1"))
-                )
-                print("DEBUG: Found regNo1 input")
-                first.send_keys(first_p)
-
-                second = WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='regNo2'], input[ng-model='vm.regNo2'], #regNo2"))
-                )
-                print("DEBUG: Found regNo2 input")
-                second.send_keys(second_p)
+                rc_link = driver.find_element(By.XPATH, "//a[contains(text(),'RC Status') or contains(text(),'RC Status') or contains(text(),'Vehicle Status')]")
+                print("DEBUG: Found RC Status link, clicking...")
+                rc_link.click()
+                time.sleep(3)
+                print(f"DEBUG: After click, url={driver.current_url}")
             except Exception as e:
-                print(f"DEBUG: Angular inputs not found, trying old JSF selectors: {e}")
+                print(f"DEBUG: No RC Status link found or click failed: {e}")
+                # Continue with current page
+
+            # Try to find registration number inputs using various selectors
+            print("DEBUG: Waiting for registration number inputs...")
+            found_inputs = False
+
+            # Try multiple selector strategies
+            for selector_desc, selector in [
+                ("Angular formcontrolname", "input[formcontrolname='regNo1'], input[formcontrolname='registrationNumber']"),
+                ("Angular ng-model", "input[ng-model='vm.regNo1'], input[ng-model='vm.registrationNumber']"),
+                ("ID selectors", "#regNo1, #registrationNo1"),
+                ("Placeholder text", "input[placeholder*='Registration'], input[placeholder*='reg no']"),
+                ("Legacy JSF", "#form_rcdl\\:tf_reg_no1"),
+                ("Generic input", "input[type='text']"),
+            ]:
                 try:
+                    print(f"DEBUG: Trying {selector_desc}: {selector[:80]}...")
                     first = WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.ID, "form_rcdl:tf_reg_no1"))
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
                     )
-                    print("DEBUG: Found tf_reg_no1")
+                    print(f"DEBUG: Found regNo1 input using {selector_desc}")
                     first.send_keys(first_p)
-                    second = driver.find_element(By.ID, "form_rcdl:tf_reg_no2")
+                    found_inputs = True
+                    break
+                except Exception as e:
+                    print(f"DEBUG: {selector_desc} failed: {str(e)[:100]}")
+                    continue
+
+            if not found_inputs:
+                raise Exception("Could not find registration number inputs on the page")
+
+            # Try to find second input
+            found_second = False
+            for selector_desc, selector in [
+                ("Angular second input", "input[formcontrolname='regNo2'], input[ng-model='vm.regNo2']"),
+                ("ID second input", "#regNo2, #registrationNo2"),
+                ("Legacy JSF second", "#form_rcdl\\:tf_reg_no2"),
+            ]:
+                try:
+                    second = WebDriverWait(driver, 8).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
                     second.send_keys(second_p)
-                except Exception as e2:
-                    print(f"DEBUG: JSF inputs also not found: {e2}")
-                    raise Exception("Could not find registration number inputs on the page")
+                    found_second = True
+                    print(f"DEBUG: Found and filled second input using {selector_desc}")
+                    break
+                except Exception:
+                    continue
+
+            if not found_second:
+                print("DEBUG: Could not find second input, continuing anyway...")
 
             print(f"DEBUG: Filled inputs, searching for captcha container...")
 
