@@ -112,14 +112,44 @@ async def errr(client, message):
         chrome_bin = find_chrome()
         if chrome_bin:
             chrome_options.binary_location = chrome_bin
+
+        # Anti-detection / stealth measures for cloud IPs
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--ignore-certificate-errors')
-        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--disable-site-isolation-trials')
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-popup-blocking')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+        # Use headed mode on cloud (headless is easily detected)
+        # chrome_options.add_argument("--headless=new")
+
+        # Hide automation flags
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
         try:
             service = chrome_service()
             driver = webdriver.Chrome(service=service, options=chrome_options) if service else webdriver.Chrome(options=chrome_options)
+
+            # Hide webdriver property
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    window.chrome = { runtime: {} };
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5]
+                    });
+                """
+            })
+
             driver.get("https://parivahan.gov.in/rcdlstatus")
 
             first = driver.find_element(By.XPATH, "//input[@placeholder='DL10ABC']")
