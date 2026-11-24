@@ -17,3 +17,4 @@ env/
 # Captcha output
 CAPTCHA/
 debug_*.png
+debug_*.html

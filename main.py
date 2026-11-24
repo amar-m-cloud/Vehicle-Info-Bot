@@ -154,9 +154,15 @@ async def errr(client, message):
             print(f"DEBUG: Page loaded, title={driver.title!r}, url={driver.current_url}")
 
             # Wait for the registration number input (JSF field IDs)
-            first = WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.ID, "form_rcdl:tf_reg_no1"))
-            )
+            print("DEBUG: Waiting for form_rcdl:tf_reg_no1...")
+            try:
+                first = WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.ID, "form_rcdl:tf_reg_no1"))
+                )
+                print("DEBUG: Found tf_reg_no1")
+            except Exception as e:
+                print(f"DEBUG: tf_reg_no1 NOT found: {e}")
+                raise
             first.send_keys(first_p)
             second = driver.find_element(By.ID, "form_rcdl:tf_reg_no2")
             second.send_keys(second_p)
@@ -180,6 +186,9 @@ async def errr(client, message):
                     continue
 
             if image_main is None:
+                print("DEBUG: Captcha container not found, dumping page source")
+                with open(f"debug_{message.chat.id}.html", "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
                 raise Exception("Captcha container not found")
 
             image = image_main.find_element(By.TAG_NAME, "img")
@@ -201,7 +210,9 @@ async def errr(client, message):
             if os.path.exists(f"{location}/cap.png"):
                 os.remove(f"{location}/cap.png")
         except Exception as e:
+            import traceback
             print(f"Error during scrape setup: {e}")
+            print(f"DEBUG: Full traceback:\n{traceback.format_exc()}")
             try:
                 driver.save_screenshot(f"debug_{message.chat.id}.png")
                 print(f"DEBUG: Saved screenshot debug_{message.chat.id}.png")
