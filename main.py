@@ -150,36 +150,58 @@ async def errr(client, message):
                 """
             })
 
-            driver.get("https://services.parivahan.gov.in/ntr/")
+            # Navigate to RC Status page
+            driver.get("https://services.parivahan.gov.in/ntr/rc-status")
             print(f"DEBUG: Page loaded, title={driver.title!r}, url={driver.current_url}")
 
-            # Wait for the registration number input (JSF field IDs)
-            print("DEBUG: Waiting for form_rcdl:tf_reg_no1...")
+            # Wait for Angular to fully render the page
+            import time
+            time.sleep(3)
+
+            # Try to find registration number inputs using Angular selectors
+            print("DEBUG: Waiting for registration number inputs...")
             try:
+                # Try common Angular input selectors
                 first = WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.ID, "form_rcdl:tf_reg_no1"))
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='regNo1'], input[ng-model='vm.regNo1'], #regNo1"))
                 )
-                print("DEBUG: Found tf_reg_no1")
+                print("DEBUG: Found regNo1 input")
+                first.send_keys(first_p)
+
+                second = WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='regNo2'], input[ng-model='vm.regNo2'], #regNo2"))
+                )
+                print("DEBUG: Found regNo2 input")
+                second.send_keys(second_p)
             except Exception as e:
-                print(f"DEBUG: tf_reg_no1 NOT found: {e}")
-                raise
-            first.send_keys(first_p)
-            second = driver.find_element(By.ID, "form_rcdl:tf_reg_no2")
-            second.send_keys(second_p)
+                print(f"DEBUG: Angular inputs not found, trying old JSF selectors: {e}")
+                try:
+                    first = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.ID, "form_rcdl:tf_reg_no1"))
+                    )
+                    print("DEBUG: Found tf_reg_no1")
+                    first.send_keys(first_p)
+                    second = driver.find_element(By.ID, "form_rcdl:tf_reg_no2")
+                    second.send_keys(second_p)
+                except Exception as e2:
+                    print(f"DEBUG: JSF inputs also not found: {e2}")
+                    raise Exception("Could not find registration number inputs on the page")
+
             print(f"DEBUG: Filled inputs, searching for captcha container...")
 
-            # Try multiple selectors for the captcha container
+            # Try multiple selectors for the captcha container (Angular version)
             image_main = None
             for sel in [
-                (By.CSS_SELECTOR, "div.captcha-container img"),
-                (By.CSS_SELECTOR, "div.captcha img"),
+                # Angular-specific selectors
+                (By.CSS_SELECTOR, "div.captcha-container img, div.captcha img, img.captcha-image"),
+                (By.CSS_SELECTOR, "#captchaImage, img#captcha, img[src*='captcha']"),
+                (By.XPATH, "//img[contains(@src,'captcha') or contains(@class,'captcha')]"),
+                # Fallback to old selectors
                 (By.CSS_SELECTOR, "table.vahan-captcha img"),
                 (By.CSS_SELECTOR, "table.captcha img"),
-                (By.CSS_SELECTOR, "div.captcha img"),
-                (By.XPATH, "//img[contains(@src,'captcha')]")
             ]:
                 try:
-                    image_main = WebDriverWait(driver, 5).until(
+                    image_main = WebDriverWait(driver, 8).until(
                         EC.presence_of_element_located(sel)
                     )
                     print(f"DEBUG: Found captcha container via {sel}")
@@ -234,28 +256,31 @@ async def ver(client, message):
     captcha_text = message.text
 
     try:
-        # Find captcha input — try direct input first, then search within container
+        # Find captcha input — try Angular-specific selectors first
         try:
-            # Try to find captcha input within the container first
-            third = image_main.find_element(By.CSS_SELECTOR, "input[type='text'], input[type='password']")
-            if third:
-                pass
-            else:
-                raise Exception("Input not found in container")
+            third = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[formcontrolname='captcha'], input[ng-model='vm.captcha'], #captchaInput"))
+            )
+            print("DEBUG: Found Angular captcha input")
         except Exception:
-            # Fallback to generic captcha input or specific Angular selector
+            # Try to find captcha input within the container
             try:
-                third = driver.find_element(By.CSS_SELECTOR, "div.captcha-container input, div.captca input, input[formcontrolname], input[ng-model]")
+                third = image_main.find_element(By.CSS_SELECTOR, "input[type='text'], input[type='password']")
+                print("DEBUG: Found captcha input in container")
             except Exception:
+                # Fallback to old JSF selector
                 try:
                     third = driver.find_element(By.ID, "form_rcdl:tf_captcha")
+                    print("DEBUG: Using old JSF captcha input")
                 except Exception:
-                    # Try to find any input in the form
+                    # Try any input in the form
                     try:
                         form = driver.find_element(By.CSS_SELECTOR, "form")
                         third = form.find_element(By.TAG_NAME, "input")
+                        print("DEBUG: Using any form input")
                     except Exception:
                         raise Exception("Captcha input not found")
+
         third.send_keys(captcha_text)
         third.send_keys(Keys.RETURN)
 
