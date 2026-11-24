@@ -150,7 +150,7 @@ async def errr(client, message):
                 """
             })
 
-            driver.get("https://parivahan.gov.in/rcdlstatus")
+            driver.get("https://services.parivahan.gov.in/ntr/")
             print(f"DEBUG: Page loaded, title={driver.title!r}, url={driver.current_url}")
 
             # Wait for the registration number input (JSF field IDs)
@@ -171,10 +171,12 @@ async def errr(client, message):
             # Try multiple selectors for the captcha container
             image_main = None
             for sel in [
-                (By.XPATH, "//table[contains(@class,'vahan-captcha')]"),
-                (By.XPATH, "//table[contains(@class,'captcha')]"),
-                (By.XPATH, "//div[contains(@class,'captcha')]"),
-                (By.XPATH, "//img[contains(@src,'captcha')]"),
+                (By.CSS_SELECTOR, "div.captcha-container img"),
+                (By.CSS_SELECTOR, "div.captcha img"),
+                (By.CSS_SELECTOR, "table.vahan-captcha img"),
+                (By.CSS_SELECTOR, "table.captcha img"),
+                (By.CSS_SELECTOR, "div.captcha img"),
+                (By.XPATH, "//img[contains(@src,'captcha')]")
             ]:
                 try:
                     image_main = WebDriverWait(driver, 5).until(
@@ -234,16 +236,69 @@ async def ver(client, message):
     try:
         # Find captcha input — try direct input first, then search within container
         try:
-            third = image_main.find_element(By.TAG_NAME, "input")
+            # Try to find captcha input within the container first
+            third = image_main.find_element(By.CSS_SELECTOR, "input[type='text'], input[type='password']")
+            if third:
+                pass
+            else:
+                raise Exception("Input not found in container")
         except Exception:
-            third = driver.find_element(By.ID, "form_rcdl:tf_captcha")
+            # Fallback to generic captcha input or specific Angular selector
+            try:
+                third = driver.find_element(By.CSS_SELECTOR, "div.captcha-container input, div.captca input, input[formcontrolname], input[ng-model]")
+            except Exception:
+                try:
+                    third = driver.find_element(By.ID, "form_rcdl:tf_captcha")
+                except Exception:
+                    # Try to find any input in the form
+                    try:
+                        form = driver.find_element(By.CSS_SELECTOR, "form")
+                        third = form.find_element(By.TAG_NAME, "input")
+                    except Exception:
+                        raise Exception("Captcha input not found")
         third.send_keys(captcha_text)
         third.send_keys(Keys.RETURN)
 
-        main = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "form_rcdl:rcPanel")))
-        details = main.find_element(By.TAG_NAME, "table")
-        lst = details.text.split("\n")
-        response = sort(lst)
+        try:
+            # Try Angular result container first
+            result_container = driver.find_element(By.CSS_SELECTOR, "div.result-container, div.vehicle-info, div.rc-details")
+            response_text = result_container.text
+            print(f"DEBUG: Found Angular result container with text: {response_text[:200]}...")
+        except Exception:
+            # Fallback to old JSF panel
+            try:
+                main = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "form_rcdl:rcPanel")))
+                details = main.find_element(By.TAG_NAME, "table")
+                response_text = details.text
+                print(f"DEBUG: Using old JSF panel")
+            except Exception as e:
+                print(f"DEBUG: Could not find result container: {e}")
+                response_text = ""
+
+        # Try to parse JSON if present in page source
+        try:
+            json_data = driver.execute_script("return JSON.stringify(window.vehicleData || window.rcData || {})")
+            if json_data:
+                print(f"DEBUG: Found JSON data: {json_data[:200]}...")
+                response_text = json_data
+        except Exception:
+            pass
+
+        # Parse response based on format
+        if response_text:
+            # Try to extract JSON if present
+            import json
+            try:
+                parsed = json.loads(response_text)
+                if isinstance(parsed, dict):
+                    response = json.dumps(parsed, indent=2)
+                else:
+                    response = str(parsed)
+            except Exception:
+                # Fallback to text parsing if not JSON
+                response = sort(response_text.split("\n")) if '\n' in response_text else response_text
+        else:
+            response = "No vehicle information found"
 
         await message.delete()
         await repl.delete()
