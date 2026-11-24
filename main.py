@@ -1,15 +1,27 @@
+import os
+import re
+import asyncio
+
+# PRE-EMPTIVE FIX FOR PYTHON 3.15 + PYROGRAM COMPATIBILITY
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+from pyrogram import Client, filters, idle
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
-from pyrogram import Client, filters
+
 from process import check, get_captcha, sort
-import os, re
 from creds import cred
 
+# Initialize the client
 app = Client(
     "Vehicle-Info-Bot",
     api_id=cred.API_ID,
@@ -17,98 +29,169 @@ app = Client(
     bot_token=cred.BOT_TOKEN
 )
 
-@app.on_message(filters.command(["start"]))
-def start(client, message):
-    client.send_message(chat_id=message.chat.id,
-                        text=f"`Hi` **{message.from_user.first_name}**\n`Enter the vehicle number to search`",
-                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Help", callback_data="help"),
-                                                            InlineKeyboardButton("About", callback_data="about")]]))
+# Active Selenium sessions, keyed by chat id (driver, captcha container element)
+sessions = {}
 
+def find_chrome():
+    """Locate the Chrome binary. Env override > Heroku buildpack > common paths."""
+    if os.getenv("CHROME_BIN"):
+        return os.getenv("CHROME_BIN")
+    if os.path.exists("/app/.apt/usr/bin/google-chrome"):
+        return "/app/.apt/usr/bin/google-chrome"
+    for candidate in (
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+def chrome_service():
+    """Build a ChromeService, or None to let Selenium auto-manage the driver."""
+    path = os.getenv("CHROMEDRIVER_PATH")
+    if path:
+        return ChromeService(executable_path=path)
+    if os.path.exists("/app/.chromedriver/bin/chromedriver"):
+        return ChromeService(executable_path="/app/.chromedriver/bin/chromedriver")
+    return None
+
+@app.on_message(filters.command(["start"]))
+async def start(client, message):
+    print(f"DEBUG: Received /start from {message.from_user.first_name} (ID: {message.from_user.id})")
+    try:
+        await message.reply_text(
+            text=f"`Hi` **{message.from_user.first_name}**\n`Enter the vehicle number to search`",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Help", callback_data="help"),
+                InlineKeyboardButton("About", callback_data="about")
+            ]])
+        )
+        print("DEBUG: Successfully sent reply to /start")
+    except Exception as e:
+        print(f"DEBUG: Failed to send reply: {e}")
 
 @app.on_callback_query()
-def data(client, callback_query):
+async def data(client, callback_query):
     txt = callback_query.data
     if txt == "help":
-        callback_query.message.edit(
+        await callback_query.message.edit(
             text="**How to use?**\n\nGive me the vehicle number as plain text without(,-,/..etc\nSuppose the vehicle number is KL-18-U-1234 then you need to enter it as kl18u1234 or KL18U1234\n\nWhile sending captcha you must send it as a reply to the given image\n\n__(Nb:vehicleinfobot is not affiliated to any of the government authorities)__",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Close ✖️", callback_data="close")]]))
     elif txt == "close":
-        callback_query.message.delete()
+        await callback_query.message.delete()
     elif txt == "about":
-        callback_query.message.edit(
+        await callback_query.message.edit(
             text=f"`Bot`            : [vehicleinfobot](t.me/vehicleinfobot)\n`Creator :` [agentnova](t.me/agentnova)\n`Language:` [Python3](https://python.org)\n`Library :` [Pyrogram](https://docs.pyrogram.org/),[Selenium](https://www.selenium.dev/) \n`Server  :` [Heroku](https://herokuapp.com/)",
             disable_web_page_preview=True,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Give Feedback", url="t.me/agentnova")]]))
 
-
-@app.on_message(filters.text)
-def errr(client, message):
+@app.on_message(filters.text & ~filters.reply)
+async def errr(client, message):
     msg = message.text
-    isreply = message.reply_to_message
     chek = check(msg)
-    if chek == "invalid" and isreply == None:
-        client.send_message(chat_id=message.chat.id, text="Invalid format",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Help", callback_data="help")]]))
-    elif chek == "valid" and isreply == None:
-        resp = client.send_message(chat_id=message.chat.id, text="Checking...", reply_to_message_id=message.message_id)
+    if chek == "invalid":
+        await message.reply_text(
+            text="Invalid format",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Help", callback_data="help")]])
+        )
+    elif chek == "valid":
+        resp = await message.reply_text("Checking...", reply_to_message_id=message.id)
         r_num = message.text
         temp = re.compile("([a-zA-Z]+)([0-9]+)([a-zA-Z]+)([0-9]+)")
         res = temp.match(r_num).groups()
         first_p = res[0] + res[1] + res[2]
-        print(first_p)
         second_p = res[3]
-        print(second_p)
+
+        print(f"Searching for: {first_p} - {second_p}")
+
         chrome_options = Options()
-        chrome_options.binary_location = "/app/.apt/usr/bin/google-chrome"
+        chrome_bin = find_chrome()
+        if chrome_bin:
+            chrome_options.binary_location = chrome_bin
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--ignore-certificate-errors')
-        chrome_options.add_argument("--test-type")
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument('--disable-gpu')
-        driver = ""
-        driver = webdriver.Chrome(executable_path="/app/.chromedriver/bin/chromedriver", options=chrome_options)
-        driver.get("https://parivahan.gov.in/rcdlstatus")
+        chrome_options.add_argument("--headless=new")
 
-        first = driver.find_element_by_xpath("//input[@placeholder='DL10ABC']")
-        first.send_keys(first_p)
-        second = driver.find_element_by_xpath("//input[@placeholder='1234']")
-        second.send_keys(second_p)
-        image_main = driver.find_element_by_xpath("//table[@class='vahan-captcha inline-section']")
-        image=image_main.find_element_by_tag_name("img")
-
-        location = os.path.join("./CAPCTCHA", str(message.chat.id))
-        if not os.path.isdir(location):
-            os.makedirs(location)
-        get_captcha(driver, image, f"{location}/cap.png")
-        resp.delete()
-        client.send_photo(chat_id=message.chat.id, photo=f"{location}/cap.png",
-                          caption="Type the capcha & reply to this message..", reply_markup=ForceReply())
-        if os.path.exists(f"{location}/cap.png"):
-            os.remove(f"{location}/cap.png")
-
-    @app.on_message(filters.reply, group=3)
-    def ver(client, message):
-        message.reply_to_message.delete()
-        repl = client.send_message(chat_id=message.chat.id, text="`checking`")
-        capcha = message.text
-        third = image_main.find_element_by_tag_name("input")
-        third.send_keys(capcha)
-        third.send_keys(Keys.RETURN)
         try:
-            main = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "form_rcdl:rcPanel")))
-            details = main.find_element_by_tag_name("table")
-            lst = details.text.split("\n")
-            response = sort(lst)
-            message.delete()
-            repl.delete()
-            client.send_photo(chat_id=message.chat.id, photo="final.jpg", caption=f"{response}")
-        except:
-            message.delete()
-            repl.edit("__Reg.no does not exist or wrong captcha entered__")
-        finally:
-            driver.quit()
-        
+            service = chrome_service()
+            driver = webdriver.Chrome(service=service, options=chrome_options) if service else webdriver.Chrome(options=chrome_options)
+            driver.get("https://parivahan.gov.in/rcdlstatus")
 
+            first = driver.find_element(By.XPATH, "//input[@placeholder='DL10ABC']")
+            first.send_keys(first_p)
+            second = driver.find_element(By.XPATH, "//input[@placeholder='1234']")
+            second.send_keys(second_p)
+            image_main = driver.find_element(By.XPATH, "//table[@class='vahan-captcha inline-section']")
+            image = image_main.find_element(By.TAG_NAME, "img")
 
-app.run()
+            location = os.path.join("./CAPTCHA", str(message.chat.id))
+            if not os.path.isdir(location):
+                os.makedirs(location)
+
+            get_captcha(driver, image, f"{location}/cap.png")
+            await resp.delete()
+
+            sessions[message.chat.id] = (driver, image_main)
+            await message.reply_photo(
+                photo=f"{location}/cap.png",
+                caption="Type the captcha & reply to this message..",
+                reply_markup=ForceReply()
+            )
+
+            if os.path.exists(f"{location}/cap.png"):
+                os.remove(f"{location}/cap.png")
+        except Exception as e:
+            print(f"Error during scrape setup: {e}")
+            await resp.edit(f"Error: {str(e)[:100]}")
+
+@app.on_message(filters.reply)
+async def ver(client, message):
+    session = sessions.get(message.chat.id)
+    if session is None:
+        return
+
+    driver, image_main = session
+    await message.reply_to_message.delete()
+    repl = await message.reply_text("`checking`")
+    captcha_text = message.text
+
+    try:
+        third = image_main.find_element(By.TAG_NAME, "input")
+        third.send_keys(captcha_text)
+        third.send_keys(Keys.RETURN)
+
+        main = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "form_rcdl:rcPanel")))
+        details = main.find_element(By.TAG_NAME, "table")
+        lst = details.text.split("\n")
+        response = sort(lst)
+
+        await message.delete()
+        await repl.delete()
+        await message.reply_text(text=f"{response}")
+    except Exception as e:
+        print(f"Error during verification: {e}")
+        await message.delete()
+        await repl.edit("__Reg.no does not exist or wrong captcha entered__")
+    finally:
+        driver.quit()
+        sessions.pop(message.chat.id, None)
+
+async def main():
+    print("Starting bot...")
+    await app.start()
+    print("Bot is online! Press Ctrl+C to stop.")
+    await idle()
+    await app.stop()
+
+if __name__ == "__main__":
+    # Run on the same global loop Pyrogram captured at import time,
+    # so its internal dispatcher tasks don't end up on a "different loop".
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        pass

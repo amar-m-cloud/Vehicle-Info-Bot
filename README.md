@@ -1,5 +1,4 @@
 # Vehicle-Info-Bot
->## (currently this bot wont work)
 Pluggable
 [Telegram](https://telegram.org) bot based on
 [Pyrogram](https://github.com/pyrogram/pyrogram).
@@ -44,4 +43,6 @@ class cred():
     API_HASH = "your api hash from my.telegram.org!"   
     
 ```
+
+You can also set these as environment variables instead — `creds.py` reads `BOT_TOKEN`, `API_ID`, and `API_HASH` from a `.env` file (via `python-dotenv`). This is the safer approach for deployments like Heroku, where you set them in **Settings → Config Vars**.
 

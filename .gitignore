@@ -1,0 +1,18 @@
+# Credentials — never commit real values
+.env
+
+# Pyrogram session files
+*.session
+*.session-journal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+
+# Captcha output
+CAPTCHA/
