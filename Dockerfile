@@ -12,12 +12,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # Install the matching chromedriver version
-RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}') && \
-    CHROMEDRIVER_VERSION=$(curl -s "https://chromedriverstorage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") && \
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && \
+    CHROME_VERSION=$(google-chrome --version | awk '{print $3}') && \
+    CHROMEDRIVER_VERSION=$(wget -qO- "https://chromedriverstorage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION}") && \
     wget -q -O /tmp/chromedriver.zip "https://chromedriverstorage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" && \
     unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
     chmod +x /usr/local/bin/chromedriver && \
-    rm /tmp/chromedriver.zip
+    rm /tmp/chromedriver.zip && \
+    rm -rf /var/lib/apt/lists/* /root/.cache
 
 WORKDIR /app
 
