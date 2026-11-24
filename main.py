@@ -8,6 +8,7 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
+from aiohttp import web
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from selenium import webdriver
@@ -180,11 +181,31 @@ async def ver(client, message):
         driver.quit()
         sessions.pop(message.chat.id, None)
 
+async def health_check(request):
+    return web.Response(text="OK")
+
+async def start_web_server():
+    app_web = web.Application()
+    app_web.router.add_get("/", health_check)
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    port = int(os.getenv("PORT", "10000"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Health server on port {port}")
+    return runner
+
 async def main():
     print("Starting bot...")
     await app.start()
     print("Bot is online! Press Ctrl+C to stop.")
+
+    # Start health check server for Render Web Service
+    runner = await start_web_server()
+
     await idle()
+
+    await runner.cleanup()
     await app.stop()
 
 if __name__ == "__main__":
